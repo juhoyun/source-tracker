@@ -1,11 +1,56 @@
 import { app, BrowserWindow, ipcMain, dialog, Menu } from 'electron';
 import * as path from 'path';
+import * as fs from 'fs';
 import { readFileContent, buildFileTree } from './fileSystem';
 import { SymbolParser } from './symbolParser';
 
 let mainWindow: BrowserWindow | null = null;
 const symbolParser = new SymbolParser();
 let currentProjectPath: string = '';
+let currentDefines: Record<string, string | null> = {};
+
+function loadDefinesFromFile(filePath: string): void {
+  currentDefines = {};
+
+  if (!fs.existsSync(filePath)) {
+    return;
+  }
+
+  try {
+    const content = fs.readFileSync(filePath, 'utf-8');
+    const lines = content.split(/\r?\n/);
+
+    let inCflagsSort = false;
+    for (const rawLine of lines) {
+      const line = rawLine.trim();
+      if (!line) continue;
+
+      if (line.startsWith('[') && line.endsWith(']')) {
+        // Block header
+        inCflagsSort = line === '[CFLAGS_sort]';
+        continue;
+      }
+
+      if (!inCflagsSort) continue;
+
+      // Inside [CFLAGS_sort] block: extract -D options
+      const match = line.match(/^-D([^\s=]+)(?:=(.+))?$/);
+      if (!match) continue;
+
+      const name = match[1];
+      const value = match[2] !== undefined ? match[2] : null;
+      currentDefines[name] = value;
+    }
+  } catch (err) {
+    console.error('Failed to read defines file:', err);
+    currentDefines = {};
+  }
+}
+
+function loadDefinesFromRtecdcOpt(projectPath: string): void {
+  const optPath = path.join(projectPath, 'rtecdc.opt');
+  loadDefinesFromFile(optPath);
+}
 
 function createMenu() {
   const template: Electron.MenuItemConstructorOptions[] = [
@@ -25,6 +70,7 @@ function createMenu() {
                 const folderPath = result.filePaths[0];
                 currentProjectPath = folderPath;
                 console.log('Opening folder from menu:', folderPath);
+                loadDefinesFromRtecdcOpt(folderPath);
                 
                 // Try to load existing database
                 const loaded = await symbolParser.loadSymbolDatabase(folderPath);
@@ -55,13 +101,30 @@ function createMenu() {
               return;
             }
             
+            // Explicitly notify renderer that a build has started
+            mainWindow?.webContents.send('build-progress', {
+              phase: 'scanning',
+              current: 0,
+              total: 0,
+            });
+
             await symbolParser.buildSymbolDatabase(currentProjectPath, mainWindow);
+            
+            // Ensure a final complete event is sent
+            mainWindow?.webContents.send('build-progress', {
+              phase: 'complete',
+              current: 0,
+              total: 0,
+            });
             
             dialog.showMessageBox({
               type: 'info',
               title: 'Build Complete',
               message: 'Symbol database has been built successfully!',
             });
+
+            // Notify renderer that symbols have been updated
+            mainWindow?.webContents.send('symbols-updated');
           }
         },
         { type: 'separator' },
@@ -97,8 +160,34 @@ function createMenu() {
         { role: 'zoomIn' },
         { role: 'zoomOut' },
         { type: 'separator' },
-        { role: 'togglefullscreen' }
-      ]
+        { role: 'togglefullscreen' },
+        { type: 'separator' },
+        {
+          label: 'View Cflags',
+          click: () => {
+            if (mainWindow) {
+              mainWindow.webContents.send('view-cflags');
+            }
+          },
+        },
+        {
+          label: 'Load Cflags',
+          click: async () => {
+            if (!mainWindow) return;
+            const result = await dialog.showOpenDialog(mainWindow, {
+              properties: ['openFile'],
+            });
+
+            if (result.canceled || result.filePaths.length === 0) {
+              return;
+            }
+
+            const filePath = result.filePaths[0];
+            loadDefinesFromFile(filePath);
+            mainWindow.webContents.send('defines-updated');
+          },
+        },
+      ],
     },
     {
       label: 'Help',
@@ -185,6 +274,7 @@ ipcMain.handle('open-folder', async () => {
 
   const folderPath = result.filePaths[0];
   currentProjectPath = folderPath;
+  loadDefinesFromRtecdcOpt(folderPath);
   
   // Try to load existing database
   const loaded = await symbolParser.loadSymbolDatabase(folderPath);
@@ -207,6 +297,14 @@ ipcMain.handle('get-file-tree', async (event, dirPath: string) => {
 
 ipcMain.handle('find-definition', async (event, symbolName: string) => {
   return symbolParser.findDefinition(symbolName);
+});
+
+ipcMain.handle('get-symbols', async () => {
+  return symbolParser.getIndex();
+});
+
+ipcMain.handle('get-defines', async () => {
+  return currentDefines;
 });
 
 // Window controls

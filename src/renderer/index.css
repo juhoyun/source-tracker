@@ -17,6 +17,34 @@ body {
   overflow: hidden;
 }
 
+/* Inactive #if/#ifdef blocks in Monaco editor */
+
+/* Whole line background - darker */
+.inactive-ifdef-line {
+  background-color: rgba(0, 0, 0, 0.3) !important;
+}
+
+/* Text color - grey out all syntax tokens */
+.inactive-ifdef-text {
+  opacity: 0.4 !important;
+  color: #808080 !important;
+}
+
+/* Override Monaco's token colors inside inactive text */
+.inactive-ifdef-text span {
+  color: #808080 !important;
+}
+
+/* Line number margin - grey */
+.inactive-ifdef-margin {
+  background-color: rgba(0, 0, 0, 0.2) !important;
+}
+
+/* Gutter decorations area */
+.inactive-ifdef-gutter {
+  opacity: 0.4 !important;
+}
+
 #root {
   width: 100vw;
   height: 100vh;

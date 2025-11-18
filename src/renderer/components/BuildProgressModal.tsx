@@ -1,34 +1,13 @@
-import { useEffect, useState } from 'react';
 import type { BuildProgress } from '../../shared/types';
 
 interface BuildProgressModalProps {
   isOpen: boolean;
+  progress: BuildProgress | null;
   onClose: () => void;
 }
 
-function BuildProgressModal({ isOpen, onClose }: BuildProgressModalProps) {
-  const [progress, setProgress] = useState<BuildProgress>({
-    phase: 'scanning',
-    current: 0,
-    total: 0,
-  });
-
-  useEffect(() => {
-    const handleProgress = (progressData: BuildProgress) => {
-      setProgress(progressData);
-      
-      if (progressData.phase === 'complete') {
-        setTimeout(() => {
-          onClose();
-        }, 1000);
-      }
-    };
-
-    // Listen for progress updates
-    window.electronAPI.onBuildProgress?.(handleProgress);
-  }, [onClose]);
-
-  if (!isOpen) return null;
+function BuildProgressModal({ isOpen, progress, onClose }: BuildProgressModalProps) {
+  if (!isOpen || !progress) return null;
 
   const getPhaseText = () => {
     switch (progress.phase) {

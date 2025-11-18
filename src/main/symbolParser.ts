@@ -240,9 +240,21 @@ export class SymbolParser {
       total: allSymbols.length,
     } as BuildProgress);
 
+    const filtered = this.filterAndDeduplicateSymbols(allSymbols);
+
+    // Persist filtered symbols to database
     await this.database.open(dirPath);
-    this.database.saveSymbols(allSymbols, dirPath);
+    this.database.saveSymbols(filtered, dirPath);
     this.database.close();
+
+    // And also update in-memory index to the same filtered set
+    this.symbolIndex = {};
+    filtered.forEach(symbol => {
+      if (!this.symbolIndex[symbol.name]) {
+        this.symbolIndex[symbol.name] = [];
+      }
+      this.symbolIndex[symbol.name].push(symbol);
+    });
 
     // Phase 4: Complete
     mainWindow?.webContents.send('build-progress', {
@@ -261,7 +273,10 @@ export class SymbolParser {
       // Convert Map to SymbolIndex
       this.symbolIndex = {};
       symbolMap.forEach((symbols: Symbol[], name: string) => {
-        this.symbolIndex[name] = symbols;
+        const filtered = this.filterAndDeduplicateSymbols(symbols);
+        if (filtered.length > 0) {
+          this.symbolIndex[name] = filtered;
+        }
       });
       
       this.database.close();
@@ -280,5 +295,40 @@ export class SymbolParser {
 
   getIndex(): SymbolIndex {
     return this.symbolIndex;
+  }
+
+  private filterAndDeduplicateSymbols(symbols: Symbol[]): Symbol[] {
+    const allowedKinds: Symbol['kind'][] = ['function', 'class', 'typedef', 'struct'];
+    const invalidNames = new Set([
+      'void', 'int', 'char', 'float', 'double', 'long', 'short', 'unsigned',
+      'signed', 'bool', 'size_t', 'u8', 'u16', 'u32', 's8', 's16', 's32',
+      'if', 'volatile', '__volatile__',
+      'BCMPOST_TRAP_RODATA', 'BCMPOST_TRAP_TEXT', 'BCMPOSTTRAPFN', 'BCMRAMFN'
+    ]);
+
+    const map = new Map<string, Symbol>();
+
+    for (const s of symbols) {
+      if (!allowedKinds.includes(s.kind)) continue;
+      if (invalidNames.has(s.name)) continue;
+
+      // typedef / class / struct 는 같은 (name, kind, filePath) 안에서는
+      // 선언 라인 하나만 남기고, 그중에서도 가장 앞에 나오는(가장 작은 line) 것만 유지한다.
+      if (s.kind === 'typedef' || s.kind === 'class' || s.kind === 'struct') {
+        const baseKey = `${s.name}|${s.kind}|${s.filePath}`;
+        const existing = map.get(baseKey);
+        if (!existing || s.line < existing.line) {
+          map.set(baseKey, s);
+        }
+        continue;
+      }
+
+      const key = `${s.name}|${s.kind}|${s.filePath}|${s.line}|${s.column}`;
+      if (!map.has(key)) {
+        map.set(key, s);
+      }
+    }
+
+    return Array.from(map.values());
   }
 }
