@@ -1,0 +1,30 @@
+appId: com.sourceviewer.app
+productName: Source Code Viewer
+directories:
+  output: release
+files:
+  - dist/**/*
+  - package.json
+win:
+  target: 
+    - target: nsis
+      arch:
+        - x64
+  sign: false
+  verifyUpdateCodeSignature: false
+mac:
+  target: 
+    - target: dmg
+      arch:
+        - x64
+        - arm64
+  category: public.app-category.developer-tools
+  hardenedRuntime: false
+  gatekeeperAssess: false
+  entitlements: null
+  entitlementsInherit: null
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
